@@ -1,0 +1,841 @@
+{
+	"name": "Pinterest Affiliate Marketing Pipeline",
+	"nodes": [
+		{
+			"parameters": {
+				"rule": {
+					"interval": [
+						{
+							"field": "hours",
+							"hoursInterval": 24,
+							"triggerAtHour": 9
+						}
+					]
+				}
+			},
+			"id": "module1-daily-trigger",
+			"name": "Daily 9AM Trigger",
+			"type": "n8n-nodes-base.scheduleTrigger",
+			"typeVersion": 1.2,
+			"position": [
+				0,
+				300
+			],
+			"notes": "MODULE 1 \u2014 DAILY TRIGGER: Runs the entire pipeline once every day at 9:00 AM"
+		},
+		{
+			"parameters": {
+				"method": "GET",
+				"url": "https://www.amazon.in/gp/bestsellers",
+				"options": {
+					"response": {
+						"response": {
+							"responseFormat": "text"
+						}
+					}
+				}
+			},
+			"id": "module2-amazon-bestsellers",
+			"name": "Fetch Amazon Best Sellers",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				250,
+				100
+			],
+			"notes": "MODULE 2 \u2014 TRENDING PRODUCT DISCOVERY: Fetch trending products from Amazon Best Sellers"
+		},
+		{
+			"parameters": {
+				"url": "https://trends.google.com/trends/trendingsearches/daily/rss?geo=IN",
+				"options": {}
+			},
+			"id": "module2-google-trends",
+			"name": "Fetch Google Trends",
+			"type": "n8n-nodes-base.rssFeedRead",
+			"typeVersion": 1,
+			"position": [
+				250,
+				300
+			],
+			"notes": "MODULE 2 \u2014 TRENDING PRODUCT DISCOVERY: Fetch trending topics from Google Trends RSS feed"
+		},
+		{
+			"parameters": {
+				"method": "GET",
+				"url": "https://www.flipkart.com/offers-store",
+				"options": {
+					"response": {
+						"response": {
+							"responseFormat": "text"
+						}
+					}
+				}
+			},
+			"id": "module2-flipkart-trending",
+			"name": "Fetch Flipkart Trending",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				250,
+				500
+			],
+			"notes": "MODULE 2 \u2014 TRENDING PRODUCT DISCOVERY: Fetch trending products from Flipkart"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 2 \u2014 PARSE & STRUCTURE PRODUCT DATA\n// Parse scraped HTML data and extract structured product information\n\nconst allProducts = [];\n\n// Process input from all sources\nfor (const item of $input.all()) {\n  const source = item.json;\n  \n  // Example structured product extraction\n  // In production, use proper HTML parsing (cheerio) or API responses\n  if (source.title && source.link) {\n    allProducts.push({\n      productName: source.title,\n      productUrl: source.link,\n      productImage: source.image || source.enclosure?.url || '',\n      price: source.price || 'Check Price',\n      category: source.category || 'General',\n      popularityScore: source.traffic || 50,\n      source: source.source || 'Google Trends',\n      discoveredAt: new Date().toISOString()\n    });\n  }\n}\n\n// Deduplicate by product URL\nconst seen = new Set();\nconst uniqueProducts = allProducts.filter(p => {\n  const key = p.productUrl;\n  if (seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});\n\n// Sort by popularity score\nuniqueProducts.sort((a, b) => b.popularityScore - a.popularityScore);\n\n// Return top 20 products\nreturn uniqueProducts.slice(0, 20).map(p => ({ json: p }));"
+			},
+			"id": "module2-parse-products",
+			"name": "Parse & Structure Products",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				500,
+				300
+			],
+			"notes": "MODULE 2 \u2014 TRENDING PRODUCT DISCOVERY: Parse all sources into structured product data with deduplication"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "https://api.moonshot.cn/v1/chat/completions",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Authorization",
+							"value": "=Bearer {{ $env.KIMI_API_KEY }}"
+						},
+						{
+							"name": "Content-Type",
+							"value": "application/json"
+						}
+					]
+				},
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={\n  \"model\": \"kimi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a Pinterest affiliate marketing expert. Analyze products and determine if they are suitable for Pinterest marketing. Return ONLY valid JSON.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze this product for Pinterest affiliate marketing potential:\\n\\nProduct: {{ $json.productName }}\\nPrice: {{ $json.price }}\\nCategory: {{ $json.category }}\\nPopularity Score: {{ $json.popularityScore }}\\n\\nEvaluate based on these criteria (score 1-10 each):\\n1. Visually Interesting - Would it look good in a Pinterest pin?\\n2. Problem Solving - Does it solve a real problem?\\n3. Curiosity Factor - Would it make people stop scrolling?\\n4. Competition Level - Is competition low? (10 = very low)\\n5. Affordability - Is it affordable for impulse buying?\\n6. Daily Life Usefulness - How useful in everyday life?\\n\\nReturn ONLY this JSON format:\\n{\\n  \\\"approved\\\": true/false,\\n  \\\"totalScore\\\": number,\\n  \\\"scores\\\": {\\n    \\\"visual\\\": number,\\n    \\\"problemSolving\\\": number,\\n    \\\"curiosity\\\": number,\\n    \\\"lowCompetition\\\": number,\\n    \\\"affordability\\\": number,\\n    \\\"dailyUse\\\": number\\n  },\\n  \\\"reason\\\": \\\"brief explanation\\\"\\n}\\n\\nApprove ONLY if totalScore >= 42 (70% of 60 max).\"\n    }\n  ],\n  \"temperature\": 0.3\n}",
+				"options": {}
+			},
+			"id": "module3-ai-filter",
+			"name": "AI Product Filter (Kimi K2.5)",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				750,
+				300
+			],
+			"notes": "MODULE 3 \u2014 AI PRODUCT FILTER: Use Kimi K2.5 to evaluate product suitability for Pinterest affiliate marketing"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 3 \u2014 FILTER APPROVED PRODUCTS\n// Parse AI response and filter only approved products\n\nconst aiResponse = $json.choices?.[0]?.message?.content || '{}';\nlet analysis;\n\ntry {\n  // Extract JSON from response (handle markdown code blocks)\n  const jsonMatch = aiResponse.match(/\\{[\\s\\S]*\\}/);\n  analysis = JSON.parse(jsonMatch ? jsonMatch[0] : aiResponse);\n} catch (e) {\n  analysis = { approved: false, reason: 'Failed to parse AI response' };\n}\n\nif (!analysis.approved) {\n  return []; // Skip non-approved products\n}\n\n// Get the original product data from the input chain\nconst product = $('Parse & Structure Products').item.json;\n\nreturn [{\n  json: {\n    ...product,\n    aiAnalysis: analysis,\n    approvedAt: new Date().toISOString()\n  }\n}];"
+			},
+			"id": "module3-filter-approved",
+			"name": "Filter Approved Products",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				1000,
+				300
+			],
+			"notes": "MODULE 3 \u2014 AI PRODUCT FILTER: Keep only products that pass the AI quality filter (score >= 42/60)"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "={{ $env.EARNKARO_API_URL || 'https://ekaro.in/api/v1' }}/links/create",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Authorization",
+							"value": "=Bearer {{ $env.EARNKARO_API_KEY }}"
+						},
+						{
+							"name": "Content-Type",
+							"value": "application/json"
+						}
+					]
+				},
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={\n  \"deal_url\": \"{{ $json.productUrl }}\",\n  \"short_link\": true,\n  \"campaign\": \"pinterest-auto-{{ $now.format('yyyy-MM-dd') }}\"\n}",
+				"options": {
+					"timeout": 30000
+				}
+			},
+			"id": "module4-earnkaro-link",
+			"name": "Generate EarnKaro Affiliate Link",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				1250,
+				300
+			],
+			"notes": "MODULE 4 \u2014 AFFILIATE LINK GENERATION: Convert product URL to EarnKaro tracking affiliate link"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 4 \u2014 MERGE AFFILIATE LINK WITH PRODUCT DATA\n\nconst product = $('Filter Approved Products').item.json;\nconst linkResponse = $json;\n\nreturn [{\n  json: {\n    ...product,\n    affiliateLink: linkResponse.affiliate_url || linkResponse.short_url || linkResponse.url || product.productUrl,\n    earnKaroLinkId: linkResponse.id || '',\n    linkGeneratedAt: new Date().toISOString()\n  }\n}];"
+			},
+			"id": "module4-merge-link",
+			"name": "Merge Affiliate Link Data",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				1500,
+				300
+			],
+			"notes": "MODULE 4 \u2014 AFFILIATE LINK GENERATION: Merge affiliate link with product data"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "https://api.moonshot.cn/v1/chat/completions",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Authorization",
+							"value": "=Bearer {{ $env.KIMI_API_KEY }}"
+						},
+						{
+							"name": "Content-Type",
+							"value": "application/json"
+						}
+					]
+				},
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={\n  \"model\": \"kimi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a Pinterest SEO and viral content expert. Generate pin content that drives clicks and engagement. Return ONLY valid JSON.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Generate Pinterest pin content for this product:\\n\\nProduct: {{ $json.productName }}\\nPrice: {{ $json.price }}\\nCategory: {{ $json.category }}\\nAI Analysis: {{ JSON.stringify($json.aiAnalysis) }}\\n\\nGenerate:\\n1. Pinterest Title (max 70 chars, curiosity-driven, emotion trigger)\\n   Example formats:\\n   - 'This Genius Kitchen Tool Is Going Viral'\\n   - 'Nobody Talks About This Smart Gadget'\\n   - 'This \u20b9299 Tool Saves Hours'\\n\\n2. Pinterest Description (SEO optimized, include keywords, CTA, 3 hashtags)\\n\\n3. Curiosity Hook (one-liner that makes people NEED to click)\\n\\n4. Keywords (5-8 relevant Pinterest search keywords)\\n\\n5. Hashtags (5 relevant hashtags)\\n\\n6. Best Pinterest Board category\\n\\nReturn ONLY this JSON:\\n{\\n  \\\"title\\\": \\\"string (max 70 chars)\\\",\\n  \\\"description\\\": \\\"string (max 500 chars, include CTA and hashtags)\\\",\\n  \\\"curiosityHook\\\": \\\"string\\\",\\n  \\\"keywords\\\": [\\\"string\\\"],\\n  \\\"hashtags\\\": [\\\"string\\\"],\\n  \\\"boardCategory\\\": \\\"string\\\",\\n  \\\"suggestedBoards\\\": [\\\"string\\\"]\\n}\"\n    }\n  ],\n  \"temperature\": 0.7\n}",
+				"options": {}
+			},
+			"id": "module5-content-generation",
+			"name": "Generate Pin Content (Kimi K2.5)",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				1750,
+				300
+			],
+			"notes": "MODULE 5 \u2014 PIN CONTENT GENERATION: Generate viral Pinterest titles, descriptions, hooks, and keywords using Kimi K2.5"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 5 \u2014 PARSE PIN CONTENT\n// Parse AI-generated pin content and merge with product data\n\nconst aiResponse = $json.choices?.[0]?.message?.content || '{}';\nlet pinContent;\n\ntry {\n  const jsonMatch = aiResponse.match(/\\{[\\s\\S]*\\}/);\n  pinContent = JSON.parse(jsonMatch ? jsonMatch[0] : aiResponse);\n} catch (e) {\n  // Fallback content generation\n  const product = $('Merge Affiliate Link Data').item.json;\n  pinContent = {\n    title: `Amazing ${product.category} Find You Need!`,\n    description: `Check out this incredible ${product.productName}! Perfect for everyday use. Click the link to get yours today! #${product.category.replace(/\\s/g, '')} #AmazonFinds #MustHave`,\n    curiosityHook: `This ${product.category} product is going viral!`,\n    keywords: [product.category, 'must have', 'trending', 'viral', 'amazon finds'],\n    hashtags: ['#AmazonFinds', '#MustHave', '#Trending'],\n    boardCategory: product.category,\n    suggestedBoards: [`${product.category} Finds`, 'Must-Have Products']\n  };\n}\n\n// Ensure title is max 70 characters\nif (pinContent.title && pinContent.title.length > 70) {\n  pinContent.title = pinContent.title.substring(0, 67) + '...';\n}\n\nconst product = $('Merge Affiliate Link Data').item.json;\n\nreturn [{\n  json: {\n    ...product,\n    pinContent\n  }\n}];"
+			},
+			"id": "module5-parse-content",
+			"name": "Parse Pin Content",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				2000,
+				300
+			],
+			"notes": "MODULE 5 \u2014 PIN CONTENT GENERATION: Parse and validate generated pin content"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 6 \u2014 IMAGE PROMPT GENERATION\n// Generate Stable Diffusion prompts automatically based on product category\n// Generates 1 optimized prompt per product to balance quality and API cost\n\nconst product = $json;\nconst category = (product.category || 'general').toLowerCase();\nconst productName = product.productName || 'product';\n\n// Category-specific prompt enhancements\nconst categoryPrompts = {\n  kitchen: 'modern kitchen setting, marble countertop, warm ambient lighting, cooking utensils in background',\n  gadgets: 'sleek tech workspace, minimalist desk setup, LED accent lighting, futuristic feel',\n  home: 'cozy living room setting, soft natural light, modern interior design, comfortable atmosphere',\n  beauty: 'elegant vanity setting, soft pink lighting, luxurious marble surface, rose petals accent',\n  fashion: 'minimalist fashion backdrop, studio lighting, elegant fabric texture, lifestyle photography',\n  fitness: 'bright gym setting, energetic atmosphere, clean modern equipment, motivational vibe',\n  study: 'organized study desk, warm lamp light, books and stationery, productive atmosphere',\n  electronics: 'modern tech setup, ambient blue lighting, clean geometric background, premium feel',\n  baby: 'soft pastel nursery, gentle lighting, warm cozy feeling, safe and comfortable',\n  default: 'clean minimal studio background, professional product photography, centered composition'\n};\n\n// Find best matching category\nlet categoryPrompt = categoryPrompts.default;\nfor (const [key, value] of Object.entries(categoryPrompts)) {\n  if (category.includes(key)) {\n    categoryPrompt = value;\n    break;\n  }\n}\n\n// Generate 1 optimized prompt per product (1024x1536 matches SDXL API dimensions)\nconst prompt = {\n  prompt: `Pinterest marketing pin design, vertical layout 1024x1536, ${productName} centered prominently, ${categoryPrompt}, bright vibrant colors, clean modern design, space for headline text at top, professional marketing aesthetic, high quality product photography, soft studio lighting, 4k detailed`,\n  negative: 'blurry, low quality, distorted, watermark, text, words, letters, ugly, deformed, noisy, grainy, dark, cluttered',\n  variation: 'optimized'\n};\n\nreturn [{\n  json: {\n    ...product,\n    imagePrompt: prompt.prompt,\n    negativePrompt: prompt.negative,\n    variation: prompt.variation\n  }\n}];"
+			},
+			"id": "module6-image-prompts",
+			"name": "Generate Image Prompts",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				2250,
+				300
+			],
+			"notes": "MODULE 6 \u2014 IMAGE PROMPT GENERATION: Generate 1 optimized category-adaptive Stable Diffusion prompt per product"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "=https://api.stability.ai/v1/generation/{{ $env.SDXL_MODEL || 'stable-diffusion-xl-1024-v1-0' }}/text-to-image",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Authorization",
+							"value": "=Bearer {{ $env.STABILITY_AI_API_KEY }}"
+						},
+						{
+							"name": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"name": "Accept",
+							"value": "application/json"
+						}
+					]
+				},
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={\n  \"text_prompts\": [\n    {\n      \"text\": \"{{ $json.imagePrompt }}\",\n      \"weight\": 1\n    },\n    {\n      \"text\": \"{{ $json.negativePrompt }}\",\n      \"weight\": -1\n    }\n  ],\n  \"cfg_scale\": 7,\n  \"width\": 1024,\n  \"height\": 1536,\n  \"steps\": 30,\n  \"samples\": 1,\n  \"style_preset\": \"photographic\"\n}",
+				"options": {
+					"timeout": 120000
+				}
+			},
+			"id": "module7-generate-image",
+			"name": "Generate AI Image (SDXL)",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				2500,
+				300
+			],
+			"notes": "MODULE 7 \u2014 AI IMAGE GENERATION: Generate Pinterest-optimized vertical images (1024x1536) using Stable Diffusion XL"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 7 \u2014 PROCESS GENERATED IMAGES\n// Extract base64 image data and prepare for Pinterest upload\n\nconst response = $json;\nconst product = $('Generate Image Prompts').item.json;\n\nconst artifacts = response.artifacts || [];\n\nif (artifacts.length === 0) {\n  // If image generation failed, use product image as fallback\n  return [{\n    json: {\n      ...product,\n      imageGenerated: false,\n      imageError: 'No image artifacts returned',\n      imageBase64: '',\n      imageMimeType: 'image/png'\n    }\n  }];\n}\n\nconst artifact = artifacts[0];\n\n// Store the base64 image data in JSON for use by Pinterest publish node\n// Pinterest API supports image_base64 source type\nreturn [{\n  json: {\n    ...product,\n    imageGenerated: true,\n    imageSeed: artifact.seed,\n    imageFinishReason: artifact.finishReason,\n    imageBase64: artifact.base64,\n    imageMimeType: 'image/png'\n  }\n}];"
+			},
+			"id": "module7-process-image",
+			"name": "Process Generated Image",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				2750,
+				300
+			],
+			"notes": "MODULE 7 \u2014 AI IMAGE GENERATION: Process SDXL output and prepare binary image data"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 8 \u2014 PIN ASSEMBLY\n// Combine title, description, image, and affiliate link into a Pinterest pin object\n\nconst product = $json;\nconst pinContent = product.pinContent || {};\nconst imageGenerated = product.imageGenerated !== false;\n\n// Determine the target board based on category\nconst boardMapping = {\n  'kitchen': 'Kitchen Gadgets',\n  'gadgets': 'Smart Home Tools',\n  'study': 'Study Productivity',\n  'electronics': 'Tech Finds',\n  'home': 'Home Essentials',\n  'beauty': 'Beauty Must-Haves',\n  'fashion': 'Fashion Finds',\n  'fitness': 'Fitness Gear',\n  'baby': 'Baby Essentials',\n  'default': 'Amazon Finds'\n};\n\nconst category = (product.category || 'default').toLowerCase();\nlet boardName = boardMapping.default;\nfor (const [key, value] of Object.entries(boardMapping)) {\n  if (category.includes(key)) {\n    boardName = value;\n    break;\n  }\n}\n\n// Assemble the complete pin object\nconst pin = {\n  // Pinterest pin fields\n  title: pinContent.title || `Amazing ${product.productName} Find!`,\n  description: pinContent.description || `Check out ${product.productName}! ${pinContent.hashtags?.join(' ') || '#AmazonFinds #MustHave #Trending'}`,\n  destinationUrl: product.affiliateLink || product.productUrl,\n  boardName: boardName,\n  \n  // Image data - use generated base64 or fall back to product image URL\n  imageBase64: product.imageBase64 || '',\n  imageMimeType: product.imageMimeType || 'image/png',\n  imageUrl: product.productImage || '',\n  imageGenerated: imageGenerated,\n  \n  // Metadata for tracking\n  productName: product.productName,\n  productUrl: product.productUrl,\n  affiliateLink: product.affiliateLink,\n  earnKaroLinkId: product.earnKaroLinkId,\n  category: product.category,\n  price: product.price,\n  variation: product.variation,\n  \n  // Content details\n  curiosityHook: pinContent.curiosityHook,\n  keywords: pinContent.keywords,\n  hashtags: pinContent.hashtags,\n  suggestedBoards: pinContent.suggestedBoards,\n  \n  // Timestamps\n  assembledAt: new Date().toISOString(),\n  publishScheduled: new Date().toISOString()\n};\n\nreturn [{ json: pin }];"
+			},
+			"id": "module8-pin-assembly",
+			"name": "Assemble Pin Object",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				3000,
+				300
+			],
+			"notes": "MODULE 8 \u2014 PIN ASSEMBLY: Combine all components into a complete Pinterest pin object ready for publishing"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 9 \u2014 RATE LIMITING & SPAM PREVENTION\n// Ensure safe posting frequency for Pinterest\n\n// Pinterest recommends max 25 pins per day per account\nconst MAX_PINS_PER_DAY = 25;\nconst DELAY_BETWEEN_PINS_MS = 300000; // 5 minutes between pins\n\nconst pin = $json;\nconst itemIndex = $itemIndex;\n\n// Add delay metadata\npin.postDelay = itemIndex * DELAY_BETWEEN_PINS_MS;\npin.postOrder = itemIndex + 1;\npin.batchId = `batch-${new Date().toISOString().split('T')[0]}`;\n\n// Check if we've exceeded daily limit\nif (itemIndex >= MAX_PINS_PER_DAY) {\n  pin.deferred = true;\n  pin.deferredReason = `Exceeded daily limit of ${MAX_PINS_PER_DAY} pins`;\n  pin.scheduledFor = new Date(Date.now() + 86400000).toISOString(); // Next day\n}\n\nreturn [{ json: pin }];"
+			},
+			"id": "module9-rate-limit",
+			"name": "Rate Limiter",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				3250,
+				300
+			],
+			"notes": "MODULE 9 \u2014 RATE LIMITING: Enforce Pinterest safe posting frequency (max 25 pins/day, 5 min intervals)"
+		},
+		{
+			"parameters": {
+				"conditions": {
+					"options": {
+						"caseSensitive": true,
+						"leftValue": "",
+						"typeValidation": "strict"
+					},
+					"conditions": [
+						{
+							"id": "deferred-check",
+							"leftValue": "={{ $json.deferred }}",
+							"rightValue": "true",
+							"operator": {
+								"type": "boolean",
+								"operation": "notTrue"
+							}
+						}
+					],
+					"combinator": "and"
+				},
+				"options": {}
+			},
+			"id": "module9-filter-deferred",
+			"name": "Filter Deferred Pins",
+			"type": "n8n-nodes-base.filter",
+			"typeVersion": 2,
+			"position": [
+				3500,
+				300
+			],
+			"notes": "MODULE 9 \u2014 PIN PUBLISHING: Only publish pins that haven't been deferred due to rate limiting"
+		},
+		{
+			"parameters": {
+				"amount": "={{ $json.postDelay || 5000 }}",
+				"unit": "milliseconds"
+			},
+			"id": "module9-delay",
+			"name": "Post Delay",
+			"type": "n8n-nodes-base.wait",
+			"typeVersion": 1.1,
+			"position": [
+				3750,
+				300
+			],
+			"notes": "MODULE 9 \u2014 PIN PUBLISHING: Wait between pins to avoid spam detection"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "https://api.pinterest.com/v5/pins",
+				"authentication": "genericCredentialType",
+				"genericAuthType": "oAuth2Api",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Content-Type",
+							"value": "application/json"
+						}
+					]
+				},
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={\n  \"title\": \"{{ $json.title }}\",\n  \"description\": \"{{ $json.description }}\",\n  \"board_id\": \"{{ $env.PINTEREST_BOARD_ID }}\",\n  \"link\": \"{{ $json.destinationUrl }}\",\n  \"media_source\": {{ $json.imageBase64 ? JSON.stringify({ source_type: \"image_base64\", content_type: $json.imageMimeType || \"image/png\", data: $json.imageBase64 }) : JSON.stringify({ source_type: \"image_url\", url: $json.imageUrl || $json.productImage }) }}\n}",
+				"options": {
+					"timeout": 30000,
+					"redirect": {
+						"redirect": {
+							"followRedirects": true,
+							"maxRedirects": 3
+						}
+					}
+				}
+			},
+			"id": "module9-publish-pin",
+			"name": "Publish Pin to Pinterest",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				4000,
+				300
+			],
+			"notes": "MODULE 9 \u2014 PIN PUBLISHING: Publish the assembled pin to Pinterest via API v5"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 9 \u2014 HANDLE PUBLISH RESPONSE\n// Process Pinterest API response and prepare data for storage\n\nconst publishResponse = $json;\nconst pinData = $('Assemble Pin Object').item.json;\n\nconst result = {\n  // Pin publish result\n  pinId: publishResponse.id || '',\n  publishedSuccessfully: !!publishResponse.id,\n  pinterestUrl: publishResponse.id ? `https://www.pinterest.com/pin/${publishResponse.id}` : '',\n  \n  // Original pin data\n  ...pinData,\n  \n  // Timestamps\n  publishedAt: new Date().toISOString(),\n  \n  // Error handling\n  publishError: publishResponse.error || null,\n  publishErrorMessage: publishResponse.message || null\n};\n\nreturn [{ json: result }];"
+			},
+			"id": "module9-handle-response",
+			"name": "Handle Publish Response",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				4250,
+				300
+			],
+			"notes": "MODULE 9 \u2014 PIN PUBLISHING: Process publish response and prepare data for storage"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "={{ $env.STORAGE_WEBHOOK_URL || 'https://your-notion-or-airtable-webhook.com' }}",
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={\n  \"product\": \"{{ $json.productName }}\",\n  \"affiliateLink\": \"{{ $json.affiliateLink }}\",\n  \"pinTitle\": \"{{ $json.title }}\",\n  \"pinDescription\": \"{{ $json.description }}\",\n  \"imageUrl\": \"{{ $json.productImage }}\",\n  \"pinterestUrl\": \"{{ $json.pinterestUrl }}\",\n  \"pinId\": \"{{ $json.pinId }}\",\n  \"boardName\": \"{{ $json.boardName }}\",\n  \"category\": \"{{ $json.category }}\",\n  \"price\": \"{{ $json.price }}\",\n  \"publishDate\": \"{{ $json.publishedAt }}\",\n  \"earnKaroLinkId\": \"{{ $json.earnKaroLinkId }}\",\n  \"variation\": \"{{ $json.variation }}\",\n  \"batchId\": \"{{ $json.batchId }}\",\n  \"published\": {{ $json.publishedSuccessfully }}\n}",
+				"options": {
+					"timeout": 10000
+				}
+			},
+			"id": "module10-store-data",
+			"name": "Store Data (Analytics)",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				4500,
+				300
+			],
+			"notes": "MODULE 10 \u2014 DATA STORAGE: Store all pin data in external storage (Notion/Airtable/PostgreSQL) for analytics and tracking"
+		},
+		{
+			"parameters": {
+				"rule": {
+					"interval": [
+						{
+							"field": "weeks",
+							"weeksInterval": 1,
+							"triggerAtDay": 1,
+							"triggerAtHour": 10
+						}
+					]
+				}
+			},
+			"id": "module11-weekly-trigger",
+			"name": "Weekly Analytics Trigger",
+			"type": "n8n-nodes-base.scheduleTrigger",
+			"typeVersion": 1.2,
+			"position": [
+				0,
+				700
+			],
+			"notes": "MODULE 11 \u2014 ANALYTICS: Trigger weekly analytics report every Monday at 10 AM"
+		},
+		{
+			"parameters": {
+				"method": "GET",
+				"url": "={{ $env.STORAGE_API_URL || 'https://your-storage-api.com' }}/pins?range=last7days",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Authorization",
+							"value": "=Bearer {{ $env.STORAGE_API_KEY }}"
+						}
+					]
+				},
+				"options": {}
+			},
+			"id": "module11-fetch-analytics",
+			"name": "Fetch Weekly Pin Data",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [
+				250,
+				700
+			],
+			"notes": "MODULE 11 \u2014 ANALYTICS: Fetch all pin data from the last 7 days for analysis"
+		},
+		{
+			"parameters": {
+				"jsCode": "// MODULE 11 \u2014 GENERATE WEEKLY ANALYTICS REPORT\n\nconst pins = $input.all().map(item => item.json);\n\n// Calculate metrics\nconst totalPins = pins.length;\nconst publishedPins = pins.filter(p => p.published).length;\nconst failedPins = totalPins - publishedPins;\n\n// Category breakdown\nconst categoryStats = {};\nfor (const pin of pins) {\n  const cat = pin.category || 'Unknown';\n  if (!categoryStats[cat]) {\n    categoryStats[cat] = { count: 0, published: 0 };\n  }\n  categoryStats[cat].count++;\n  if (pin.published) categoryStats[cat].published++;\n}\n\n// Board breakdown\nconst boardStats = {};\nfor (const pin of pins) {\n  const board = pin.boardName || 'Unknown';\n  if (!boardStats[board]) {\n    boardStats[board] = 0;\n  }\n  boardStats[board]++;\n}\n\nconst report = {\n  reportDate: new Date().toISOString(),\n  period: 'Last 7 Days',\n  summary: {\n    totalPinsGenerated: totalPins,\n    publishedSuccessfully: publishedPins,\n    failed: failedPins,\n    successRate: totalPins > 0 ? ((publishedPins / totalPins) * 100).toFixed(1) + '%' : '0%'\n  },\n  categoryBreakdown: categoryStats,\n  boardBreakdown: boardStats,\n  topCategories: Object.entries(categoryStats)\n    .sort((a, b) => b[1].count - a[1].count)\n    .slice(0, 5)\n    .map(([name, stats]) => ({ name, ...stats }))\n};\n\nreturn [{ json: report }];"
+			},
+			"id": "module11-generate-report",
+			"name": "Generate Analytics Report",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				500,
+				700
+			],
+			"notes": "MODULE 11 \u2014 ANALYTICS: Generate weekly performance report with category and board breakdowns"
+		},
+		{
+			"parameters": {
+				"fromEmail": "={{ $env.NOTIFICATION_EMAIL }}",
+				"toEmail": "={{ $env.ADMIN_EMAIL }}",
+				"subject": "=Weekly Pinterest Affiliate Marketing Report - {{ $now.format('yyyy-MM-dd') }}",
+				"emailType": "html",
+				"html": "=<h2>\ud83d\udcca Weekly Pinterest Affiliate Marketing Report</h2>\n<p><strong>Period:</strong> {{ $json.period }}</p>\n<h3>Summary</h3>\n<ul>\n  <li>Total Pins Generated: <strong>{{ $json.summary.totalPinsGenerated }}</strong></li>\n  <li>Published Successfully: <strong>{{ $json.summary.publishedSuccessfully }}</strong></li>\n  <li>Failed: <strong>{{ $json.summary.failed }}</strong></li>\n  <li>Success Rate: <strong>{{ $json.summary.successRate }}</strong></li>\n</ul>\n<h3>Top Categories</h3>\n<ul>\n{{ $json.topCategories.map(c => `<li>${c.name}: ${c.count} pins (${c.published} published)</li>`).join('') }}\n</ul>",
+				"options": {}
+			},
+			"id": "module11-send-report",
+			"name": "Send Weekly Report Email",
+			"type": "n8n-nodes-base.emailSend",
+			"typeVersion": 2.1,
+			"position": [
+				750,
+				700
+			],
+			"notes": "MODULE 11 \u2014 ANALYTICS: Send weekly performance report via email to admin"
+		},
+		{
+			"parameters": {
+				"jsCode": "// ERROR HANDLER \u2014 Global error recovery\n// Handles errors from any node in the pipeline\n\nconst error = $json;\nconst errorNode = $execution?.lastNodeExecuted || 'Unknown';\n\nconst errorReport = {\n  errorAt: new Date().toISOString(),\n  node: errorNode,\n  message: error.message || error.error || 'Unknown error',\n  code: error.code || error.statusCode || 'N/A',\n  executionId: $execution?.id || 'N/A',\n  \n  // Retry info\n  retryable: true,\n  maxRetries: 3,\n  retryDelay: 60000 // 1 minute\n};\n\nreturn [{ json: errorReport }];"
+			},
+			"id": "error-handler",
+			"name": "Error Handler",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [
+				2500,
+				600
+			],
+			"notes": "ADDITIONAL \u2014 ERROR HANDLING: Global error handler for pipeline failures with retry metadata"
+		}
+	],
+	"connections": {
+		"Daily 9AM Trigger": {
+			"main": [
+				[
+					{
+						"node": "Fetch Amazon Best Sellers",
+						"type": "main",
+						"index": 0
+					},
+					{
+						"node": "Fetch Google Trends",
+						"type": "main",
+						"index": 0
+					},
+					{
+						"node": "Fetch Flipkart Trending",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Fetch Amazon Best Sellers": {
+			"main": [
+				[
+					{
+						"node": "Parse & Structure Products",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Fetch Google Trends": {
+			"main": [
+				[
+					{
+						"node": "Parse & Structure Products",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Fetch Flipkart Trending": {
+			"main": [
+				[
+					{
+						"node": "Parse & Structure Products",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Parse & Structure Products": {
+			"main": [
+				[
+					{
+						"node": "AI Product Filter (Kimi K2.5)",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"AI Product Filter (Kimi K2.5)": {
+			"main": [
+				[
+					{
+						"node": "Filter Approved Products",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Filter Approved Products": {
+			"main": [
+				[
+					{
+						"node": "Generate EarnKaro Affiliate Link",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Generate EarnKaro Affiliate Link": {
+			"main": [
+				[
+					{
+						"node": "Merge Affiliate Link Data",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Merge Affiliate Link Data": {
+			"main": [
+				[
+					{
+						"node": "Generate Pin Content (Kimi K2.5)",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Generate Pin Content (Kimi K2.5)": {
+			"main": [
+				[
+					{
+						"node": "Parse Pin Content",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Parse Pin Content": {
+			"main": [
+				[
+					{
+						"node": "Generate Image Prompts",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Generate Image Prompts": {
+			"main": [
+				[
+					{
+						"node": "Generate AI Image (SDXL)",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Generate AI Image (SDXL)": {
+			"main": [
+				[
+					{
+						"node": "Process Generated Image",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Process Generated Image": {
+			"main": [
+				[
+					{
+						"node": "Assemble Pin Object",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Assemble Pin Object": {
+			"main": [
+				[
+					{
+						"node": "Rate Limiter",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Rate Limiter": {
+			"main": [
+				[
+					{
+						"node": "Filter Deferred Pins",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Filter Deferred Pins": {
+			"main": [
+				[
+					{
+						"node": "Post Delay",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Post Delay": {
+			"main": [
+				[
+					{
+						"node": "Publish Pin to Pinterest",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Publish Pin to Pinterest": {
+			"main": [
+				[
+					{
+						"node": "Handle Publish Response",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Handle Publish Response": {
+			"main": [
+				[
+					{
+						"node": "Store Data (Analytics)",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Weekly Analytics Trigger": {
+			"main": [
+				[
+					{
+						"node": "Fetch Weekly Pin Data",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Fetch Weekly Pin Data": {
+			"main": [
+				[
+					{
+						"node": "Generate Analytics Report",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Generate Analytics Report": {
+			"main": [
+				[
+					{
+						"node": "Send Weekly Report Email",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		}
+	},
+	"settings": {
+		"executionOrder": "v1",
+		"saveManualExecutions": true,
+		"callerPolicy": "workflowsFromSameOwner",
+		"errorWorkflow": ""
+	},
+	"staticData": null,
+	"tags": [
+		{
+			"name": "affiliate-marketing"
+		},
+		{
+			"name": "pinterest"
+		},
+		{
+			"name": "automation"
+		},
+		{
+			"name": "ai-generated"
+		}
+	],
+	"pinData": {},
+	"meta": {
+		"templateId": "pinterest-affiliate-marketing-v1",
+		"instanceId": ""
+	}
+}
