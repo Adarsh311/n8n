@@ -2,13 +2,17 @@
   "name": "n8n-on-render",
   "private": true,
   "version": "1.0.0",
-  "engines": { 
-    "node": ">=18" 
+  "engines": {
+    "node": ">=18"
   },
-  "scripts": { 
-    "start": "n8n start" 
+  "scripts": {
+    "start": "n8n start",
+    "build:custom-nodes": "cd custom-nodes/n8n-nodes-pinterest && npm run build && cd ../n8n-nodes-earnkaro && npm run build && cd ../n8n-nodes-stability-ai && npm run build"
   },
-  "dependencies": { 
-    "n8n": "2.8.3" 
+  "dependencies": {
+    "n8n": "2.8.3"
+  },
+  "n8n": {
+    "customExtensionsPath": "custom-nodes/"
   }
 }
