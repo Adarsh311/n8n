@@ -192,10 +192,9 @@ POST /links/create
 **Node:** Code
 **Purpose:** Generate category-adaptive Stable Diffusion prompts
 
-**Generates 3 variations per product:**
-1. Clean Product Shot
-2. Lifestyle Photography
-3. Modern Design Style
+**Generates 1 optimized prompt per product:**
+- Category-adaptive prompt with Pinterest vertical dimensions (1024×1536)
+- Negative prompt to exclude low quality artifacts
 
 **Prompt Template:**
 ```

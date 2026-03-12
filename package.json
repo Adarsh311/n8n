@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "n8n start",
-    "build:custom-nodes": "cd custom-nodes/n8n-nodes-pinterest && npm run build && cd ../n8n-nodes-earnkaro && npm run build && cd ../n8n-nodes-stability-ai && npm run build"
+    "build:custom-nodes": "for dir in custom-nodes/n8n-nodes-*/; do if [ -d \"$dir\" ] && [ -f \"$dir/package.json\" ]; then echo \"Building $dir\" && (cd \"$dir\" && npm run build); fi; done"
   },
   "dependencies": {
     "n8n": "2.8.3"
